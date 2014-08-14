@@ -13,21 +13,21 @@ class Importer
 
 # Look in the Jira XML and find the project number
 
-@@jira_project = 10160
+@@jira_project = 12345
 
 # Specify the path to the jira xml dump
-@@jira_xml_path = "/Users/bfagin/Documents/Code Projects/github_issue_importer/JIRA-backup-20140814/entities.xml"
+@@jira_xml_path = ""
 
 # Github login creds
-@@github_login = "UnquietCode"
+@@github_login = ""
 @@github_password = ""
 
 # Specify the github project
-@@github_project = "UnquietCode/flapi-issues4"
+@@github_project = ""
 
 # Author mapping Hash to convert jira users to github users. All assignable users need to be declared here even if they don't have a github
 # account. If they don't give them a github account of "".
-@@authors = Hash["uqcadmin" => "UnquietCode", "jirauser2" => "githubuser2"]
+@@authors = Hash["jirauser1" => "githubuser1", "jirauser2" => "githubuser2"]
 
 # Status mapping Hash to convert jira statuses to github opened/closed state. Will probably work, but double check with the xml dump.
 @@statuses = {
@@ -114,7 +114,7 @@ def create_milestones()
         :description => description
     })
 
-    milestones[id] = milestone.number
+    @milestones[id] = milestone.number
   end
 
   puts "Milestones:"
@@ -204,6 +204,8 @@ end
 def import()
   create_milestones()
   process_issues()
+
+  puts "Finished importing issues to #{@@github_project}!"
 end
 
 end # Importer class
