@@ -48,6 +48,7 @@ class Importer
 @client
 @doc
 @milestones
+@labels
 
 def initialize()
 
@@ -59,6 +60,7 @@ def initialize()
   @doc = Nokogiri::XML(jira_xml_file)
 
   @milestones = {}
+  @labels = {}
 end
 
 def process_text(text)
@@ -127,7 +129,12 @@ def get_issue_type_name(issue)
   return type_name
 end
 
+
+
 def get_gh_label(label)
+  cached = @labels[label]
+  return cached if cached
+
   begin
     gh_label = @client.label(@@github_project, label)
   rescue Octokit::NotFound => e
@@ -135,7 +142,9 @@ def get_gh_label(label)
     gh_label = @client.add_label(@@github_project, label, color)
   end
 
-  return gh_label.name
+  label_name = gh_label.name
+  @labels[label] = label_name
+  return label_name
 end
 
 # Get only the issues from the specified project
@@ -209,10 +218,13 @@ def process_issues()
     end
 
     # Create the ticket
-    created = @client.create_issue(@@github_project, title, body, options)
+    created = @client.create_issue(@@github_project, title, body, options) unless @@dry_run
 
-    # Pull all of the comments associated with this particular iss
-    com = @doc.xpath("//Action[@type='comment'][@issue="+issue.xpath("@id").text+"]").each do |c|
+    # Pull all of the comments associated with this particular issue
+    comments = @doc.xpath("//Action[@type='comment'][@issue="+issue.xpath("@id").text+"]")
+    comments = comments.sort_by { |comment| comment.xpath("@created").text }
+
+    comments.each do |c|
       author = get_author_text(c.xpath("@author").text)
       body = "#{author} said:\n" + process_text(c.xpath("@body").text + c.xpath("body").text)
       @client.add_comment(@@github_project, created.number, body) unless @@dry_run
@@ -235,7 +247,7 @@ def import()
   create_milestones()
   process_issues()
 
-  puts "Finished importing issues to #{@@github_project}!"
+  puts "\nFinished importing issues to '#{@@github_project}'!"
 end
 
 end # Importer class
