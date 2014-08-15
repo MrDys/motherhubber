@@ -1,6 +1,7 @@
 require 'nokogiri'
 require 'octokit'
 
+
 class Importer
 
 
@@ -9,7 +10,7 @@ class Importer
 ##############################
 
 # dry run?
-@@dry_run = false
+@@dry_run = true
 
 # Look in the Jira XML and find the project number
 
@@ -19,15 +20,15 @@ class Importer
 @@jira_xml_path = ""
 
 # Github login creds
-@@github_login = ""
-@@github_password = ""
+@@github_login = "gh_user"
+@@github_password = "gh_password"
 
 # Specify the github project
-@@github_project = ""
+@@github_project = "User/repo"
 
 # Author mapping Hash to convert jira users to github users. All assignable users need to be declared here even if they don't have a github
 # account. If they don't give them a github account of "".
-@@authors = Hash["jirauser1" => "githubuser1", "jirauser2" => "githubuser2"]
+@@authors = Hash["jirauser" => "gh_user"]
 
 # Status mapping Hash to convert jira statuses to github opened/closed state. Will probably work, but double check with the xml dump.
 @@statuses = {
@@ -36,9 +37,9 @@ class Importer
   3 => "In Progress",
   5 => "Resolved",
   6 => "Closed",
-  10000 => "Evaluation"
 }
 @@closed_statuses = [5, 6]
+@@special_statuses = [4]
 
 ##############################
 # End Config
@@ -110,17 +111,32 @@ def create_milestones()
     puts "creating milestone #{name}"
 
     milestone = @client.create_milestone(@@github_project, name, {
-        :state => released ? "closed" : "open",
-        :description => description
+      :state => released ? "closed" : "open",
+      :description => description
     })
 
     @milestones[id] = milestone.number
   end
 
-  puts "Milestones:"
-  puts @milestones
+  puts "Milestones:\n #{@milestones}\n\n"
 end
 
+def get_issue_type_name(issue)
+  issue_type = issue.xpath("@type").text
+  type_name = @doc.xpath("//IssueType[@id='#{issue_type}']")[0].xpath("@name").text
+  return type_name
+end
+
+def get_gh_label(label)
+  begin
+    gh_label = @client.label(@@github_project, label)
+  rescue Octokit::NotFound => e
+    color = "%06x" % (rand * 0xffffff)
+    gh_label = @client.add_label(@@github_project, label, color)
+  end
+
+  return gh_label.name
+end
 
 # Get only the issues from the specified project
 def process_issues()
@@ -136,10 +152,11 @@ def process_issues()
 
     # Github does not allow you to assign a reporter via the API, so...
     # Add the original reporter as an addendum.
-    body += "\n\n--------------------------------------------------\n"
+    body += "\n\n--------------------------------------------------"
+    body += "\nImported from JIRA"
 
     reporter = issue.xpath("@reporter").text
-    body += "Originally reported by: #{get_author_text(reporter)}"
+    body += "\nOriginally reported by: #{get_author_text(reporter)}"
 
     options = {}
 
@@ -168,10 +185,23 @@ def process_issues()
       options[:milestone] = issue_milestones[0]
     end
 
-
     # labels
-    # TODO
-    #options[:labels] = [""]
+    labels = options[:labels] = []
+
+    # make the issue type a label
+    issue_type = get_gh_label(get_issue_type_name(issue))
+    labels.push(issue_type)
+
+    # if the status is special, include it as a label
+    status_id = issue.xpath("@status").text.to_i
+
+    if @@special_statuses.include?(status_id)
+      status_label = get_gh_label(@@statuses[status_id])
+      labels.push(status_label)
+    end
+
+    # TODO actual JIRA labels
+
 
     # If it's unassigned, don't try to assign it when you create the ticket
     if assign != ""
@@ -190,7 +220,7 @@ def process_issues()
 
 
     # If the ticket's closed, close it up
-    if @@closed_statuses.include?(issue.xpath("@status").text.to_i)
+    if @@closed_statuses.include?(status_id)
       @client.close_issue(@@github_project, created.number) unless @@dry_run
     end
 
